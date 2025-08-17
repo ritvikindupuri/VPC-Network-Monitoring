@@ -36,7 +36,7 @@ This project demonstrates the design, implementation, and validation of a **dual
 
 ## 🧾 Full Technical Documentation
 
-Full implementation steps, log analysis examples, CloudWatch query logic, and screenshots are available in [`Technical_Report.pdf`](link-to-your-uploaded-pdf).
+Full implementation steps, log analysis queries, and screenshots are documented in the “AWS VPC Monitoring Documentation” file.
 
 ---
 
