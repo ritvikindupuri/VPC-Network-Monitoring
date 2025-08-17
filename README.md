@@ -1,2 +1,2 @@
 # VPC-Network-Monitoring
-A Detailed Technical documentation of the VPC Network monitoring project
+Comprehensive Technical Documentation for the VPC Network Monitoring Project
