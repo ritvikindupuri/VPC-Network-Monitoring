@@ -1,0 +1,177 @@
+# Defines the entire dual-VPC, peered network with Flow Log monitoring enabled from the start.
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Deploys a dual-VPC environment with VPC Peering, enables VPC Flow Logs
+  to a central CloudWatch Log Group, and launches an EC2 instance in each VPC.
+
+Parameters:
+  MyIP:
+    Type: String
+    Description: Your personal IP address for SSH access.
+
+Resources:
+  # --- VPC 1 Resources ---
+  VPC1:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.1.0.0/16
+      Tags: [{Key: Name, Value: !Sub '${AWS::StackName}-VPC1'}]
+  Subnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC1
+      CidrBlock: 10.1.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags: [{Key: Name, Value: !Sub '${AWS::StackName}-Subnet1'}]
+  InternetGateway1:
+    Type: AWS::EC2::InternetGateway
+  AttachGateway1:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC1
+      InternetGatewayId: !Ref InternetGateway1
+  RouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC1
+  Route1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway1
+  AssociateRouteTable1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref Subnet1
+      RouteTableId: !Ref RouteTable1
+  SecurityGroup1:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Allow SSH from MyIP and all traffic from Peer VPC'
+      VpcId: !Ref VPC1
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 22, ToPort: 22, CidrIp: !Ref MyIP }
+        - { IpProtocol: -1, FromPort: -1, ToPort: -1, CidrIp: !GetAtt VPC2.CidrBlock }
+  Instance1:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      SubnetId: !Ref Subnet1
+      SecurityGroupIds: [!Ref SecurityGroup1]
+      ImageId: 'ami-0c55b159cbfafe1f0' # Amazon Linux 2023 AMI in us-east-1
+      Tags: [{Key: Name, Value: !Sub '${AWS::StackName}-Instance1'}]
+
+  # --- VPC 2 Resources (similar to VPC 1) ---
+  VPC2:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.2.0.0/16
+      Tags: [{Key: Name, Value: !Sub '${AWS::StackName}-VPC2'}]
+  Subnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC2
+      CidrBlock: 10.2.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags: [{Key: Name, Value: !Sub '${AWS::StackName}-Subnet2'}]
+  InternetGateway2:
+    Type: AWS::EC2::InternetGateway
+  AttachGateway2:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: { VpcId: !Ref VPC2, InternetGatewayId: !Ref InternetGateway2 }
+  RouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties: { VpcId: !Ref VPC2 }
+  Route2:
+    Type: AWS::EC2::Route
+    Properties: { RouteTableId: !Ref RouteTable2, DestinationCidrBlock: 0.0.0.0/0, GatewayId: !Ref InternetGateway2 }
+  AssociateRouteTable2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref Subnet2, RouteTableId: !Ref RouteTable2 }
+  SecurityGroup2:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Allow SSH from MyIP and all traffic from Peer VPC'
+      VpcId: !Ref VPC2
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 22, ToPort: 22, CidrIp: !Ref MyIP }
+        - { IpProtocol: -1, FromPort: -1, ToPort: -1, CidrIp: !GetAtt VPC1.CidrBlock }
+  Instance2:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      SubnetId: !Ref Subnet2
+      SecurityGroupIds: [!Ref SecurityGroup2]
+      ImageId: 'ami-0c55b159cbfafe1f0' # Amazon Linux 2023 AMI in us-east-1
+      Tags: [{Key: Name, Value: !Sub '${AWS::StackName}-Instance2'}]
+
+  # --- VPC Peering Resources ---
+  VPCPeeringConnection:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      VpcId: !Ref VPC1
+      PeerVpcId: !Ref VPC2
+      Tags: [{Key: Name, Value: !Sub '${AWS::StackName}-Peering'}]
+  RouteFrom1To2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTable1
+      DestinationCidrBlock: !GetAtt VPC2.CidrBlock
+      VpcPeeringConnectionId: !Ref VPCPeeringConnection
+  RouteFrom2To1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTable2
+      DestinationCidrBlock: !GetAtt VPC1.CidrBlock
+      VpcPeeringConnectionId: !Ref VPCPeeringConnection
+
+  # --- Monitoring Resources ---
+  FlowLogsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '${AWS::StackName}-VPCFlowLogs'
+  FlowLogsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: vpc-flow-logs.amazonaws.com}, Action: 'sts:AssumeRole'}]
+  FlowLogsPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: 'vpc-flow-logs-policy'
+      Roles: [!Ref FlowLogsRole]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: ['logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams']
+            Resource: !GetAtt FlowLogsLogGroup.Arn
+  VPC1FlowLog:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      ResourceType: VPC
+      ResourceId: !Ref VPC1
+      TrafficType: ALL
+      LogDestinationType: cloud-watch-logs
+      LogGroupName: !Ref FlowLogsLogGroup
+      DeliverLogsPermissionArn: !GetAtt FlowLogsRole.Arn
+  VPC2FlowLog:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      ResourceType: VPC
+      ResourceId: !Ref VPC2
+      TrafficType: ALL
+      LogDestinationType: cloud-watch-logs
+      LogGroupName: !Ref FlowLogsLogGroup
+      DeliverLogsPermissionArn: !GetAtt FlowLogsRole.Arn
+
+Outputs:
+  Instance1PublicIP:
+    Description: 'Public IP of instance in VPC1'
+    Value: !GetAtt Instance1.PublicIp
+  Instance2PublicIP:
+    Description: 'Public IP of instance in VPC2'
+    Value: !GetAtt Instance2.PublicIp
